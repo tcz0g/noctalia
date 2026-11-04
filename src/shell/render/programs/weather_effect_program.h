@@ -9,15 +9,18 @@
 #include <array>
 #include <cstdint>
 
-class EffectProgram final : public RenderExtension {
+class TextureId;
+
+class WeatherEffectProgram final : public RenderExtension {
 public:
   void ensureInitialized();
   void destroy() override;
   void abandon() noexcept override;
 
+  // `particles` is WeatherEffectNode's particle texture; only the Rain and Snow programs sample it.
   void draw(
-      float surfaceWidth, float surfaceHeight, float width, float height, const EffectStyle& style,
-      const Mat3& transform = Mat3::identity()
+      TextureId particles, float surfaceWidth, float surfaceHeight, float width, float height,
+      const WeatherEffectStyle& style, const Mat3& transform = Mat3::identity()
   ) const;
 
 private:
@@ -28,18 +31,21 @@ private:
     GLint positionLoc = -1;
     GLint surfaceSizeLoc = -1;
     GLint quadSizeLoc = -1;
-    GLint rectOriginLoc = -1;
-    GLint rectSizeLoc = -1;
     GLint transformLoc = -1;
     GLint timeLoc = -1;
     GLint itemWidthLoc = -1;
     GLint itemHeightLoc = -1;
     GLint bgColorLoc = -1;
+    // Fog and Cloud only: theme accent tint (WeatherEffectStyle::accentColor).
+    GLint accentColorLoc = -1;
     GLint radiusLoc = -1;
     GLint alternativeLoc = -1;
+    // Rain and Snow only: particle texture and live particle count.
+    GLint particlesLoc = -1;
+    GLint particleCountLoc = -1;
   };
 
-  void initProgram(EffectType type, const char* fragSource);
+  void initProgram(WeatherEffectType type, const char* fragSource);
 
   std::array<ProgramData, kEffectCount> m_programs;
 };

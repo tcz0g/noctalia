@@ -514,6 +514,8 @@ _noctalia_sources = files(
   'src/dbus/network/network_display.cpp',
   'src/dbus/network/network_manager_service.cpp',
   'src/dbus/network/network_secret_agent.cpp',
+  'src/dbus/network/network_secret_keyring.cpp',
+  'src/dbus/network/vpn_auth_dialog.cpp',
   'src/dbus/network/wpa_supplicant_service.cpp',
   'src/dbus/polkit/polkit_agent.cpp',
   'src/dbus/polkit/polkit_session_support.cpp',
@@ -685,22 +687,24 @@ _noctalia_sources = files(
   'src/shell/polkit/polkit_panel.cpp',
   'src/shell/render/audio_spectrum_node.cpp',
   'src/shell/render/countdown_ring_node.cpp',
-  'src/shell/render/effect_node.cpp',
   'src/shell/render/fancy_audio_visualizer_node.cpp',
   'src/shell/render/graph_node.cpp',
   'src/shell/render/lockscreen_transition_node.cpp',
   'src/shell/render/programs/audio_spectrum_program.cpp',
   'src/shell/render/programs/countdown_ring_program.cpp',
-  'src/shell/render/programs/effect_program.cpp',
   'src/shell/render/programs/fancy_audio_visualizer_program.cpp',
   'src/shell/render/programs/graph_program.cpp',
   'src/shell/render/programs/lockscreen_transition_program.cpp',
   'src/shell/render/programs/screen_corner_program.cpp',
   'src/shell/render/programs/wallpaper_mask_program.cpp',
   'src/shell/render/programs/wallpaper_program.cpp',
+  'src/shell/render/programs/weather_effect_program.cpp',
   'src/shell/render/screen_corner_node.cpp',
   'src/shell/render/wallpaper_mask_node.cpp',
   'src/shell/render/wallpaper_node.cpp',
+  'src/shell/render/weather_effect_node.cpp',
+  'src/shell/render/weather_effect_rain_simulation.cpp',
+  'src/shell/render/weather_effect_snow_simulation.cpp',
   'src/shell/visuals/audio_visualizer.cpp',
   'src/shell/visuals/fancy_audio_visualizer.cpp',
   'src/shell/visuals/graph.cpp',
@@ -1070,9 +1074,21 @@ noctalia_exe = executable('noctalia',
   install: true,
 )
 
+noctalia_session_config = configuration_data()
+noctalia_session_config.set(
+  'NOCTALIA_EXECUTABLE',
+  get_option('prefix') / get_option('bindir') / 'noctalia',
+)
+configure_file(
+  input: 'assets/noctalia.service.in',
+  output: 'noctalia.service',
+  configuration: noctalia_session_config,
+  install_dir: get_option('datadir') / 'noctalia' / 'assets',
+)
+
 install_subdir('assets',
   install_dir: get_option('datadir') / 'noctalia',
-  exclude_files: ['dev.noctalia.Noctalia.desktop', 'dev.noctalia.Noctalia.Annotator.desktop'],
+  exclude_files: ['dev.noctalia.Noctalia.desktop', 'dev.noctalia.Noctalia.Annotator.desktop', 'noctalia.service.in'],
 )
 
 install_data(
@@ -1206,6 +1222,7 @@ if build_tests
     'monitor_selector',
     'network_display',
     'network_manager_security',
+    'network_secret_keyring',
     'niri_workspace_backend',
     'notification_dnd',
     'notification_filter',
@@ -1260,6 +1277,7 @@ if build_tests
     'uri',
     'v4l2_camera',
     'vdir_reader',
+    'vpn_auth_dialog',
     'wallpaper_scan_symlink',
     'wallpaper_shuffle_state',
     'wayland_toplevels_identity',
