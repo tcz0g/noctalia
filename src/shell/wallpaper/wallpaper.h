@@ -128,6 +128,15 @@ private:
   void refreshTextureCoverage(WallpaperInstance& instance);
   TransitionRedirect redirectActiveTransition(WallpaperInstance& instance, const std::string& path);
   void startTransition(WallpaperInstance& instance);
+  // Sync batch (syncTransitions): defer transition starts until every member's image is ready,
+  // then fire all members together so multi-monitor changes animate in lockstep.
+  void armSyncBatch();
+  void releaseSyncWaiters();
+  void maybeFireSyncBatch();
+  // Startup wave (syncTransitions): first-load transitions self-register and fire together once
+  // every monitor has started its own initial load.
+  void fireStartupWave();
+  void syncSkip(WallpaperInstance& instance);
   void startTransitionAnimation(WallpaperInstance& instance, float fromTime, WallpaperTransitionDirection direction);
   void finishTransition(WallpaperInstance& instance);
   void promotePendingWallpaper(WallpaperInstance& instance);
@@ -146,6 +155,8 @@ private:
   bool m_syncedPickValid = false;
   WallpaperTransition m_syncedTransition = WallpaperTransition::Fade;
   TransitionParams m_syncedParams{};
+  // True while a sync batch (syncTransitions) is waiting for all members' images to be ready.
+  bool m_syncArmed = false;
   std::int64_t m_lastAutomationSecondStamp = -1;
   std::int64_t m_lastAutomationSwitchSecond = -1;
   // Startup automation runs before instances exist, so onStateChange() cannot derive

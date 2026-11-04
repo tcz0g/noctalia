@@ -187,6 +187,8 @@ SharedTextureCache::acquire(SharedTextureRequest request, RenderBackend* backend
 }
 
 void SharedTextureCache::abandonGpuResources() noexcept {
+  // Invalidate uploads in flight: their GL objects die with the old share group.
+  m_resetSerial.fetch_add(1);
   if (m_textureManager != nullptr) {
     m_textureManager->abandonGpuResources();
   }
@@ -426,6 +428,16 @@ bool SharedTextureCache::hasLoadingEntry(const SharedTextureRequest& request) co
 }
 
 void SharedTextureCache::upload(const EntryKey& key, Entry& entry, const DecodedImage& image) {
+  if (image.uploaded.valid() && image.resetSerial == m_resetSerial.load()) {
+    // The decode thread already uploaded through the shared context; nothing to do on this one.
+    entry.handle = image.uploaded;
+    entry.state = EntryState::Ready;
+    kLog.info(
+        "uploaded {} ({}x{} from {}x{})", key.request.path, image.width, image.height, image.sourceWidth,
+        image.sourceHeight
+    );
+    return;
+  }
   if (!makeCurrentFor(key)) {
     return;
   }
@@ -504,12 +516,14 @@ void SharedTextureCache::workerLoop() {
       }
     }
 
+    // Stamped onto every result; uploads made before a GPU reset land in the destroyed share group and must be re-uploaded.
+    const std::uint64_t serial = m_resetSerial.load();
     const std::string& path = batch.front().path;
     auto loaded = loadImageFile(path);
     if (!loaded) {
       kLog.warn("failed to decode {} ({})", ImageSourceLog::describe(path), loaded.error());
       for (SharedTextureRequest& request : batch) {
-        pushResult(DecodedImage{.request = std::move(request), .failed = true});
+        pushResult(DecodedImage{.request = std::move(request), .failed = true, .resetSerial = serial});
       }
       continue;
     }
@@ -543,16 +557,41 @@ void SharedTextureCache::workerLoop() {
           .sourceWidth = sourceWidth,
           .sourceHeight = sourceHeight,
           .opaque = opaque,
+          .resetSerial = serial,
       };
     };
+    std::vector<DecodedImage> results;
     for (std::size_t i = 0; i + 1 < batch.size(); ++i) {
       DecodedImage image = reduce(batch[i]);
       image.pixels = pixels;
-      pushResult(std::move(image));
+      results.push_back(std::move(image));
     }
     DecodedImage last = reduce(batch.back());
     last.pixels = std::move(pixels);
-    pushResult(std::move(last));
+    results.push_back(std::move(last));
+
+    // Upload on this thread when a shared context exists, so the main thread never blocks on glTexImage2D. If the root
+    // can't be bound (lost on resume, or already current elsewhere), pixels are kept and dispatch() uploads instead.
+    if (m_textureManager != nullptr && m_sharedGl->makeCurrentSurfaceless()) {
+      for (DecodedImage& image : results) {
+        TextureHandle handle = batch.front().kind == SharedTextureKind::AlphaMask
+            ? m_textureManager->loadFromPixels(
+                  image.pixels.data(), image.width, image.height, TextureDataFormat::Alpha, TextureFilter::Linear, true
+              )
+            : m_textureManager->loadFromRgba(image.pixels.data(), image.width, image.height, true);
+        if (!handle.valid()) {
+          continue; // keep the pixels so dispatch() can retry on the main thread
+        }
+        handle.sourceWidth = image.sourceWidth;
+        handle.sourceHeight = image.sourceHeight;
+        handle.opaque = image.opaque;
+        image.uploaded = std::move(handle);
+        std::vector<std::uint8_t>().swap(image.pixels); // RAM no longer needed on the main thread
+      }
+    }
+    for (DecodedImage& image : results) {
+      pushResult(std::move(image));
+    }
   }
 }
 

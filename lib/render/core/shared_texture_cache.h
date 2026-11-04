@@ -156,6 +156,9 @@ private:
     int sourceHeight = 0;
     bool opaque = false;
     bool failed = false;
+    // Set when the decode thread already uploaded through the shared context; pixels may then be empty.
+    TextureHandle uploaded;
+    std::uint64_t resetSerial = 0;
   };
 
   void retainEntry(const EntryKey& key);
@@ -186,6 +189,8 @@ private:
   int m_eventFd = -1;
   std::thread m_worker;
   std::atomic<bool> m_shutdown{false};
+  // Bumped on GPU reset; uploads stamped with an older serial landed in the destroyed share group and must be re-uploaded.
+  std::atomic<std::uint64_t> m_resetSerial{0};
 
   mutable std::mutex m_queueMutex;
   std::condition_variable m_queueCv;

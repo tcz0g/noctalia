@@ -521,7 +521,9 @@ void Wallpaper::onOutputChange() {
 std::vector<WallpaperChange> Wallpaper::onStateChange() {
   kLog.info("state file changed, checking for updates");
 
-  m_syncedPickValid = false;
+  if (m_config->config().wallpaper.syncTransitions) {
+    armSyncBatch();
+  }
 
   std::vector<WallpaperChange> changes = std::exchange(m_pendingStartupChanges, {});
   for (auto& inst : m_instances) {
@@ -1388,6 +1390,7 @@ void Wallpaper::loadWallpaper(WallpaperInstance& instance, const std::string& pa
   }
   if (image.empty() || image.failed()) {
     kLog.warn("failed to load {}", path);
+    syncSkip(instance); // a failed load never reports ready; don't let it stall the sync batch
     return;
   }
   if (!image.texture().valid()) {
@@ -1406,6 +1409,7 @@ void Wallpaper::onImageChanged(WallpaperInstance& instance) {
     if (instance.loadingImage.failed()) {
       kLog.warn("failed to load {}", instance.loadingPath);
       cancelLoading(instance);
+      syncSkip(instance); // a failed decode never reports ready; don't let it stall the sync batch
     } else if (instance.loadingImage.texture().valid()) {
       SharedTextureCache::Lease image = std::move(instance.loadingImage);
       const std::string path = std::exchange(instance.loadingPath, std::string{});
@@ -1481,6 +1485,24 @@ Wallpaper::redirectActiveTransition(WallpaperInstance& instance, const std::stri
 void Wallpaper::startTransition(WallpaperInstance& instance) {
   const auto& wpConfig = m_config->config().wallpaper;
 
+  // Sync batch: hold this transition until every member's image is ready, then start all
+  // members together so multi-monitor changes animate in lockstep.
+  if (m_syncArmed && instance.syncMember) {
+    instance.syncReady = true;
+    maybeFireSyncBatch();
+    return;
+  }
+
+  // Startup lockstep: first-load transitions register themselves and wait until every monitor
+  // has started its own initial load, then all start together. Self-registration (instead of a
+  // batch armed at configure time) survives outputs being enumerated after the first image is ready.
+  if (!m_syncArmed && !instance.syncMember && wpConfig.syncTransitions && instance.currentPath.empty()) {
+    instance.syncMember = true;
+    instance.syncReady = true;
+    fireStartupWave(); // no-op while other monitors are still pending their initial load
+    return;
+  }
+
   if (wpConfig.transitions.empty()) {
     instance.transitioning = true;
     instance.transitionDirection = WallpaperTransitionDirection::Forward;
@@ -1513,6 +1535,91 @@ void Wallpaper::startTransition(WallpaperInstance& instance) {
   instance.activeTransition = picked;
   instance.transitionParams = params;
   startTransitionAnimation(instance, 0.0F, WallpaperTransitionDirection::Forward);
+}
+
+void Wallpaper::armSyncBatch() {
+  releaseSyncWaiters(); // flush waiters from the previous event so they cannot stall
+
+  m_syncArmed = true;
+  m_syncedPickValid = false; // each batch rolls its own shared effect/params
+  for (auto& inst : m_instances) {
+    if (!inst->surface || !inst->wallpaperNode) {
+      continue;
+    }
+    const auto newPath = m_config->getWallpaperPath(inst->connectorName);
+    // Same "will start a fresh transition" conditions as the onStateChange() loop below.
+    if (newPath.empty() || inst->transitioning) {
+      continue;
+    }
+    if (newPath == inst->currentPath || newPath == inst->loadingPath) {
+      continue;
+    }
+    inst->syncMember = true;
+    inst->syncSkipped = false; // a fresh batch re-evaluates this instance from scratch
+  }
+}
+
+void Wallpaper::releaseSyncWaiters() {
+  for (auto& inst : m_instances) {
+    if (!inst->syncMember) {
+      continue;
+    }
+    const bool ready = std::exchange(inst->syncReady, false);
+    inst->syncSkipped = false;
+    inst->syncMember = false; // cleared before startTransition so it proceeds to animate
+    if (ready) {
+      startTransition(*inst);
+    }
+  }
+  m_syncArmed = false;
+}
+
+void Wallpaper::maybeFireSyncBatch() {
+  if (!m_syncArmed) {
+    return;
+  }
+  for (auto& inst : m_instances) {
+    if (inst->syncMember && !inst->syncReady && !inst->syncSkipped) {
+      return; // a member's image is still decoding
+    }
+  }
+  releaseSyncWaiters();
+}
+
+void Wallpaper::fireStartupWave() {
+  if (m_syncArmed) {
+    return; // an armed state-change batch takes precedence over the startup wave
+  }
+  bool anyMember = false;
+  for (auto& inst : m_instances) {
+    anyMember |= inst->syncMember;
+  }
+  if (!anyMember) {
+    return;
+  }
+  for (auto& inst : m_instances) {
+    // A monitor that hasn't started its initial load yet keeps the wave pending.
+    if (!inst->syncMember && !inst->transitioning && !inst->syncSkipped && inst->currentPath.empty()
+        && !m_config->getWallpaperPath(inst->connectorName).empty()) {
+      return;
+    }
+  }
+  m_syncedPickValid = false; // each startup wave rolls its own shared effect/params
+  for (auto& inst : m_instances) {
+    if (!inst->syncMember || !std::exchange(inst->syncReady, false)) {
+      continue;
+    }
+    startTransition(*inst); // syncMember stays set so the re-entry skips the startup block
+    inst->syncMember = false;
+  }
+}
+
+void Wallpaper::syncSkip(WallpaperInstance& instance) {
+  // A failed load never reports ready; mark it skipped so neither an armed batch nor a pending
+  // startup wave waits for it. Harmless when nothing is waiting (cleared on the next member mark).
+  instance.syncSkipped = true;
+  maybeFireSyncBatch();
+  fireStartupWave();
 }
 
 void Wallpaper::startTransitionAnimation(
