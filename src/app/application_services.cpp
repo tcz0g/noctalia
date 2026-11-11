@@ -550,6 +550,22 @@ void Application::initServices() {
   initSessionBusServices();
 }
 
+void Application::queueTemplateApply(
+    const noctalia::theme::GeneratedPalette& generatedPalette, std::string_view mode, bool paletteChanged
+) {
+  m_templateGate.enqueue(
+      paletteChanged,
+      [this, palette = generatedPalette, mode = std::string(mode)](bool changed) {
+        m_templateApplyService.apply(palette, mode, /*force=*/false, /*paletteChanged=*/changed);
+      },
+      [this] { return m_wallpaper.isTransitionActive(); },
+      [this](std::function<void()> tick) {
+        m_templateApplyTimer.stop();
+        m_templateApplyTimer.start(std::chrono::milliseconds(250), std::move(tick));
+      }
+  );
+}
+
 void Application::initStyleThemeAndWayland() {
   std::signal(SIGTERM, signal_handler);
   std::signal(SIGINT, signal_handler);
@@ -763,7 +779,7 @@ void Application::initStyleThemeAndWayland() {
     const bool colorsChanged = !lastGeneratedPalette.has_value() || *lastGeneratedPalette != generated;
     lastGeneratedPalette = generated;
     m_settingsWindow.setResolvedPalette(generated, mode);
-    m_templateApplyService.apply(generated, mode, /*force=*/false, /*paletteChanged=*/colorsChanged);
+    queueTemplateApply(generated, mode, colorsChanged);
     if (previousMode.has_value() && *previousMode != resolvedMode) {
       m_hookManager.fire(
           HookKind::ThemeModeChanged,

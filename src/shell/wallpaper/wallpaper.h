@@ -61,6 +61,7 @@ public:
   // connector is unknown. Shared by the wallpaper-set IPC handler and plugin scripts.
   bool applyWallpaperImage(const std::optional<std::string>& connector, const std::string& path);
   void setAutomationGate(std::function<bool()> gate);
+  bool isTransitionActive() const noexcept;
   bool ownsSurface(wl_surface* surface) const noexcept;
   bool onPointerEvent(const PointerEvent& event);
 

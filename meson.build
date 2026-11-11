@@ -1325,6 +1325,7 @@ if build_tests
     'sway_workspace_backend',
     'system_monitor_service',
     'taskbar_widget',
+    'template_apply_gate',
     'template_apply_notify',
     'template_apply_shutdown',
     'template_hook_async',
