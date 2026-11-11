@@ -1090,13 +1090,14 @@ struct LauncherProviderConfig {
   bool operator==(const LauncherProviderConfig&) const = default;
 };
 
-// Modifier that must be held to move/resize an already selected capture region.
+// Modifier, or the Space key, that must be held to move/resize an already selected capture region.
 enum class ScreenshotRegionModifier : std::uint8_t {
   None = 0,
   Super = 1,
   Ctrl = 2,
   Alt = 3,
   Shift = 4,
+  Space = 5,
 };
 
 constexpr EnumOption<ScreenshotRegionModifier> kScreenshotRegionModifiers[] = {
@@ -1105,6 +1106,7 @@ constexpr EnumOption<ScreenshotRegionModifier> kScreenshotRegionModifiers[] = {
     {ScreenshotRegionModifier::Ctrl, "ctrl", "settings.options.screenshot.region-modifier.ctrl"},
     {ScreenshotRegionModifier::Alt, "alt", "settings.options.screenshot.region-modifier.alt"},
     {ScreenshotRegionModifier::Shift, "shift", "settings.options.screenshot.region-modifier.shift"},
+    {ScreenshotRegionModifier::Space, "space", "settings.options.screenshot.region-modifier.space"},
 };
 
 // File format for saved screenshots; clipboard copies and pipe commands always receive PNG.
@@ -1583,9 +1585,10 @@ constexpr EnumOption<BrightnessBackendPreference> kBrightnessBackendPreferences[
 struct BrightnessMonitorOverride {
   std::string match;
   std::optional<BrightnessBackendPreference> backend;
-  std::optional<std::string> backlightDevice; // sysfs device name or path, e.g. "intel_backlight"
-  std::optional<std::int32_t> ddcBus;         // DDC bus number, e.g. 6 for i2c-6
-
+  std::optional<std::string> backlightDevice;    // sysfs device name or path, e.g. "intel_backlight"
+  std::optional<std::int32_t> ddcBus;            // DDC bus number, e.g. 6 for i2c-6
+  std::optional<float> scheduledDayBrightness;   // overrides the global day target (0.0 to 1.0)
+  std::optional<float> scheduledNightBrightness; // overrides the global night target (0.0 to 1.0)
   bool operator==(const BrightnessMonitorOverride&) const = default;
 };
 
@@ -1595,6 +1598,10 @@ struct BrightnessConfig {
   std::vector<std::string> ddcutilIgnoreMmids;
   std::vector<BrightnessMonitorOverride> monitorOverrides;
   float minimumBrightness = 0.0F;
+
+  bool enableScheduledBrightness = false;
+  float scheduledNightBrightness = 0.5F;
+  float scheduledDayBrightness = 1.0F;
 
   bool operator==(const BrightnessConfig&) const = default;
 };
