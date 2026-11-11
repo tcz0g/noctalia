@@ -439,7 +439,7 @@ location = "https://example.invalid/bad"
     c.brightness.enableDdcutil = true;
     c.brightness.ddcutilIgnoreMmids = {"ABC123"};
     c.brightness.monitorOverrides = {
-        {"DP-1", BrightnessBackendPreference::Ddcutil, std::nullopt, 7},
+        {"DP-1", BrightnessBackendPreference::Ddcutil, std::nullopt, 7, 0.8F, 0.25F},
         {"eDP-1", std::nullopt, "intel_backlight", std::nullopt},
     };
     c.battery.warningThreshold = 15;
@@ -568,7 +568,7 @@ location = "https://example.invalid/bad"
     c.shell.screenshot.closeOnSave = false; // non-default (default is true) so the round-trip exercises it
     c.shell.screenshot.copyOnClose = true;
     c.shell.screenshot.appendModeSuffix = false; // non-default (default is true) so the round-trip exercises it
-    c.shell.screenshot.regionModifier = ScreenshotRegionModifier::Super;
+    c.shell.screenshot.regionModifier = ScreenshotRegionModifier::Space;
     c.shell.screenshot.regionBorderWidth = 4.0F;
     c.shell.screenshot.regionDimOpacity = 0.8F;
     c.shell.screenshot.showRegionHint = false;
