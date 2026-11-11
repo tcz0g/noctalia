@@ -525,6 +525,7 @@ std::vector<WallpaperChange> Wallpaper::onStateChange() {
   m_syncedPickValid = false;
 
   std::vector<WallpaperChange> changes = std::exchange(m_pendingStartupChanges, {});
+  bool deferredAny = false;
   for (auto& inst : m_instances) {
     auto newPath = m_config->getWallpaperPath(inst->connectorName);
     if (inst->surface == nullptr || inst->wallpaperNode == nullptr) {
@@ -578,6 +579,12 @@ std::vector<WallpaperChange> Wallpaper::onStateChange() {
       cancelLoading(*inst);
       continue;
     }
+    // Fullscreen hold: defer changes that would start a fresh transition; onFullscreenHoldChanged(false)
+    // re-runs this reconcile. Outputs still showing no wallpaper apply anyway (no blank desktop).
+    if (fullscreenHeld() && !inst->currentPath.empty()) {
+      deferredAny = true;
+      continue;
+    }
     if (newPath == inst->loadingPath) {
       continue;
     }
@@ -597,6 +604,9 @@ std::vector<WallpaperChange> Wallpaper::onStateChange() {
     }
     notifyKdePlasmaWallpaper(newPath, inst->connectorName, output);
   }
+  // Accumulated across the whole pass: one applied instance (e.g. an output with no wallpaper
+  // yet) must not forget that other instances were held back by the fullscreen hold.
+  m_heldChangesDeferred = deferredAny;
 
   // Any wallpaper change (manual selection, IPC, or automation) restarts the
   // rotation interval so the next automatic switch is a full interval away.
@@ -925,6 +935,39 @@ void Wallpaper::resetAutomationState() {
 void Wallpaper::setAutomationGate(std::function<bool()> gate) { m_automationGate = std::move(gate); }
 
 bool Wallpaper::automationAllowed() const noexcept { return !m_automationGate || m_automationGate(); }
+
+void Wallpaper::setFullscreenProbe(std::function<bool()> probe) { m_fullscreenProbe = std::move(probe); }
+
+bool Wallpaper::fullscreenHeld() const {
+  return m_config != nullptr
+      && m_config->config().wallpaper.automation.pauseOnFullscreen
+      && m_fullscreenProbe
+      && m_fullscreenProbe();
+}
+
+void Wallpaper::onFullscreenHoldChanged(bool held) {
+  if (held) {
+    // Fullscreen hold only exists while pause_on_fullscreen is enabled; a toplevel edge with the
+    // option off must not freeze running fades.
+    if (!fullscreenHeld()) {
+      return;
+    }
+    for (auto& inst : m_instances) {
+      if (inst->transitioning && inst->transitionAnimId != 0) {
+        inst->animations.cancel(inst->transitionAnimId);
+        inst->transitionAnimId = 0;
+      }
+    }
+    return;
+  }
+
+  // Released (or the option was toggled off mid-hold): resume animations frozen by the hold.
+  for (auto& inst : m_instances) {
+    if (inst->transitioning && inst->transitionAnimId == 0 && inst->transitionTime > 0.0F) {
+      startTransitionAnimation(*inst, inst->transitionTime, inst->transitionDirection);
+    }
+  }
+}
 
 ThemeMode Wallpaper::directoryThemeMode() const noexcept {
   const ThemeMode configured = m_config != nullptr ? shellThemeMode(m_config->config().theme) : ThemeMode::Dark;
@@ -1538,6 +1581,18 @@ void Wallpaper::startTransitionAnimation(
   if (durationMs <= 0.0F) {
     setTransitionTime(instance, toTime);
     finishTransition(instance);
+    return;
+  }
+  if (fullscreenHeld()) {
+    if (instance.currentPath.empty()) {
+      // First wallpaper (startup): deferring would leave the desktop blank. One commit to
+      // snap it in beats an invisible wallpaper; later changes defer via the reconcile gate.
+      setTransitionTime(instance, toTime);
+      finishTransition(instance);
+      return;
+    }
+    // Stay frozen on the current blend; onFullscreenHoldChanged(false) restarts the animation
+    // with the remaining time. The loaded pair is already in place, so nothing is lost.
     return;
   }
 

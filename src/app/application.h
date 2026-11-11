@@ -391,6 +391,8 @@ private:
   ScreenCorners m_screenCorners;
   TrayMenu m_trayMenu;
   Wallpaper m_wallpaper;
+  bool m_wallpaperFullscreenHeld = false;
+  void applyWallpaperChangePipeline();
   Backdrop m_backdrop;
   SettingsWindow m_settingsWindow;
   LayerPopupHostRegistry m_layerPopupHosts;
